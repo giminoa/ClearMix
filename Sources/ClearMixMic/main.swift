@@ -23,6 +23,7 @@ SEÇENEKLER
   --input-buffer <kare> Yalnızca mikrofon (giriş) tamponunu ayarla
   --mute                Cihaz çıkışını sessize al (yankıyı önler)
   --record <dosya.wav>  İşlenmiş sesi 48 kHz mono WAV olarak kaydet
+  --soak <dakika>       Dayanıklılık testi: dakika başına özet ve sonda karar
 
 ÖRNEK
   clearmix-mic run --seconds 10 --record /tmp/temiz.wav
@@ -83,6 +84,7 @@ private struct Options {
     var bufferFrames = 0
     var inputBufferFrames = 0
     var mute = false
+    var soakMinutes = 0.0
     var recordPath: String?
 }
 
@@ -106,6 +108,7 @@ private func parse(_ arguments: [String]) -> Options {
         case "--buffer": options.bufferFrames = Int(value()) ?? 0
         case "--input-buffer": options.inputBufferFrames = Int(value()) ?? 0
         case "--mute": options.mute = true
+        case "--soak": options.soakMinutes = Double(value()) ?? 0
         case "--record": options.recordPath = value()
         case "-h", "--help": print(usage); exit(0)
         default: fail("bilinmeyen seçenek: \(key)\n\n\(usage)")
@@ -201,7 +204,10 @@ guard command == "run" else {
     fail("bilinmeyen komut: \(command)\n\n\(usage)")
 }
 
-private let options = parse(Array(arguments.dropFirst()))
+private var options = parse(Array(arguments.dropFirst()))
+if options.soakMinutes > 0 && options.seconds == 0 {
+    options.seconds = options.soakMinutes * 60
+}
 
 private let inputDevices = AudioDevices.inputs()
 private let inputDevice: AudioDevice
@@ -328,29 +334,74 @@ let started = Date()
 var lastReport = started
 var lastSnapshot = engine.stats.snapshot
 
+// Soak bookkeeping: latency/fill extremes since the last minute line, and the
+// counters right after the first minute, which are the warm-up baseline.
+var soakLatencySum = 0.0
+var soakSamples = 0
+var soakMaxLatencyMS = 0.0
+var soakMinFillMS = Double.infinity
+var soakMaxFillMS = 0.0
+var soakBaseUnderruns: UInt64?
+var soakBaseOverruns: UInt64?
+
 while true {
     Thread.sleep(forTimeInterval: 0.1)
     let now = Date()
-    if now.timeIntervalSince(lastReport) >= 1 {
+    if options.soakMinutes > 0 {
+        let latency = engine.estimatedLatency * 1_000
+        soakLatencySum += latency
+        soakSamples += 1
+        soakMaxLatencyMS = max(soakMaxLatencyMS, latency)
+        let fillMS = Double(engine.stats.snapshot.fillFrames) / max(engine.inputSampleRate, 1) * 1_000
+        soakMinFillMS = min(soakMinFillMS, fillMS)
+        soakMaxFillMS = max(soakMaxFillMS, fillMS)
+    }
+
+    if now.timeIntervalSince(lastReport) >= (options.soakMinutes > 0 ? 60 : 1) {
         let snapshot = engine.stats.snapshot
-        let inDB = AudioMath.linearToDb(engine.chain.inputPeak)
-        let outDB = AudioMath.linearToDb(engine.chain.outputPeak)
-        let fillMS = Double(snapshot.fillFrames) / max(engine.inputSampleRate, 1) * 1_000
-        let underruns = snapshot.underrunFrames &- lastSnapshot.underrunFrames
-        let overruns = snapshot.overrunFrames &- lastSnapshot.overrunFrames
-        let inPerSecond = snapshot.framesIn &- lastSnapshot.framesIn
-        print(String(
-            format: "  giriş %6.1f dBFS → %6.1f dBFS | ses %.2f | okunan %llu/s | bekleyen %d | düşen %d | tampon %5.1f ms | kayma %+.3f%% | alt besleme %llu, taşma %llu | gecikme ~%.1f ms",
-            inDB, outDB,
-            Double(engine.chain.voiceProbability),
-            inPerSecond,
-            engine.chain.pendingCount,
-            engine.chain.droppedFrames,
-            fillMS,
-            (engine.chain.driftStep - 1) * 100,
-            underruns, overruns,
-            engine.estimatedLatency * 1_000
-        ))
+        if options.soakMinutes > 0 {
+            let underruns = snapshot.underrunFrames &- lastSnapshot.underrunFrames
+            let overruns = snapshot.overrunFrames &- lastSnapshot.overrunFrames
+            let minute = Int(now.timeIntervalSince(started) / 60)
+            print(String(
+                format: "  dakika %2d | gecikme ort %.1f / maks %.1f ms | halka %.1f–%.1f ms | alt besleme +%llu, taşma +%llu | kayma %+.3f%%",
+                minute,
+                soakLatencySum / Double(max(soakSamples, 1)),
+                soakMaxLatencyMS,
+                soakMinFillMS,
+                soakMaxFillMS,
+                underruns, overruns,
+                (engine.chain.driftStep - 1) * 100
+            ))
+            if soakBaseUnderruns == nil {
+                soakBaseUnderruns = snapshot.underrunFrames
+                soakBaseOverruns = snapshot.overrunFrames
+            }
+            soakLatencySum = 0
+            soakSamples = 0
+            soakMaxLatencyMS = 0
+            soakMinFillMS = Double.infinity
+            soakMaxFillMS = 0
+        } else {
+            let inDB = AudioMath.linearToDb(engine.chain.inputPeak)
+            let outDB = AudioMath.linearToDb(engine.chain.outputPeak)
+            let fillMS = Double(snapshot.fillFrames) / max(engine.inputSampleRate, 1) * 1_000
+            let underruns = snapshot.underrunFrames &- lastSnapshot.underrunFrames
+            let overruns = snapshot.overrunFrames &- lastSnapshot.overrunFrames
+            let inPerSecond = snapshot.framesIn &- lastSnapshot.framesIn
+            print(String(
+                format: "  giriş %6.1f dBFS → %6.1f dBFS | ses %.2f | okunan %llu/s | bekleyen %d | düşen %d | tampon %5.1f ms | kayma %+.3f%% | alt besleme %llu, taşma %llu | gecikme ~%.1f ms",
+                inDB, outDB,
+                Double(engine.chain.voiceProbability),
+                inPerSecond,
+                engine.chain.pendingCount,
+                engine.chain.droppedFrames,
+                fillMS,
+                (engine.chain.driftStep - 1) * 100,
+                underruns, overruns,
+                engine.estimatedLatency * 1_000
+            ))
+        }
         lastSnapshot = snapshot
         lastReport = now
     }
@@ -372,6 +423,15 @@ print(String(
     (engine.chain.driftStep - 1) * 100
 ))
 print("giriş tamponu şu an \(inputDevice.bufferFrameSize) kare")
+if options.soakMinutes > 0 {
+    let addedUnderruns = final.underrunFrames &- (soakBaseUnderruns ?? final.underrunFrames)
+    let addedOverruns = final.overrunFrames &- (soakBaseOverruns ?? final.overrunFrames)
+    let minutes = Double(final.framesOut) / MicChain.sampleRate / 60
+    let verdict = (addedUnderruns == 0 && addedOverruns == 0)
+        ? "GEÇTİ — ısınma sonrası çıtırtı/kesinti yok"
+        : "KALDI — \(addedUnderruns) kare alt besleme, \(addedOverruns) kare taşma"
+    print(String(format: "soak: %.1f dk · %@", minutes, verdict))
+}
 if let path = options.recordPath {
     print("kayıt: \(path)")
 }
