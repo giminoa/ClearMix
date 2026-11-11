@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>ClearMix Mixer</string>
+    <key>CFBundleDisplayName</key>
+    <string>ClearMix</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.clearmix.mixer</string>
+    <key>CFBundleExecutable</key>
+    <string>ClearMixMix</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.5.0</string>
+    <key>CFBundleVersion</key>
+    <string>5</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.4</string>
+    <key>LSUIElement</key>
+    <true/>
+    <!-- Both are required by TCC: without them a process tap returns silence. -->
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>ClearMix, seçtiğiniz uygulamaların sesini kendi ses mikrofonuna karıştırmak için sistem sesini kaydeder.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>ClearMix, mikrofonunuzu gürültüden arındırmak için mikrofonunuza erişir.</string>
+</dict>
+</plist>
