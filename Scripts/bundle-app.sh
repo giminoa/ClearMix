@@ -11,6 +11,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Ad-hoc by default, which is enough for local TCC attribution. Setting
+# CODESIGN_IDENTITY switches to a Developer ID signature with hardened runtime;
+# Scripts/release.sh uses that path for notarized builds.
+identity="${CODESIGN_IDENTITY:-}"
+entitlements="Resources/ClearMix.entitlements"
+
 # `swift build --product` misparses on this toolchain, so build everything.
 swift build -c release
 bin="$(swift build -c release --show-bin-path)"
@@ -23,9 +29,15 @@ bundle() {
     if [ -f Resources/AppIcon.icns ]; then
         cp Resources/AppIcon.icns "$bundle/Contents/Resources/AppIcon.icns"
     fi
-    # Ad-hoc signature: enough for TCC to attribute the bundle and record a choice.
-    codesign --force --deep --sign - "$bundle" >/dev/null
-    echo "$bundle hazır."
+    if [ -n "$identity" ]; then
+        codesign --force --deep --options runtime --timestamp \
+            --entitlements "$entitlements" --sign "$identity" "$bundle" >/dev/null
+        echo "$bundle hazır (Developer ID)."
+    else
+        # Ad-hoc signature: enough for TCC to attribute the bundle and record a choice.
+        codesign --force --deep --sign - "$bundle" >/dev/null
+        echo "$bundle hazır."
+    fi
 }
 
 bundle clearmix-ui ClearMix build/ClearMix.app Resources/AppInfo.plist
