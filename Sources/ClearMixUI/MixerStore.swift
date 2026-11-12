@@ -1035,6 +1035,12 @@ final class MixerStore: ObservableObject {
             "  - \(row.name) [\(row.key)] out=\(row.outputDeviceName) rate=\(Int(row.tap.tapSampleRate))/\(Int(row.tap.outputSampleRate)) inCalls=\(row.tap.captureCalls) nonZero=\(row.tap.nonZeroCaptureCalls) status=\(row.tap.lastStatus)"
         }.joined(separator: "\n")
         let micStats = session.microphoneStats?.snapshot
+        let stabilitySummary: String
+        if let passed = stabilityTestPassed {
+            stabilitySummary = "\(passed ? "GEÇTİ" : "KALDI") — \(stabilityTestResult ?? "")"
+        } else {
+            stabilitySummary = isStabilityTestRunning ? "çalışıyor…" : "çalıştırılmadı"
+        }
         let report = """
         ClearMix Diagnostics
         macOS: \(os)
@@ -1042,6 +1048,7 @@ final class MixerStore: ObservableObject {
         BlackHole 2ch: \(blackHoleDevice?.name ?? "not installed")
         Mic Running: \(isMicrophoneRunning) (latency ~\(microphoneLatencyMilliseconds) ms)
         Mic Stats: in=\(micStats?.framesIn ?? 0) out=\(micStats?.framesOut ?? 0) underrun=\(micStats?.underrunFrames ?? 0) overrun=\(micStats?.overrunFrames ?? 0)
+        Stability Test: \(stabilitySummary)
         Last Error: \(lastError ?? "none")
         Outputs:
         \(outputs)
