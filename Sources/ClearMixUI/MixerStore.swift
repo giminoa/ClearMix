@@ -5,6 +5,7 @@ import CoreAudio
 import Foundation
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 import os
 
 /// Main-thread state coordinator for the ClearMix menu bar app.
@@ -1023,7 +1024,8 @@ final class MixerStore: ObservableObject {
         statusMessage = L10n.text("Komut panoya kopyalandı.", "Command copied to clipboard.", lang: lang)
     }
 
-    func copyDiagnosticsReport() {
+    /// The text behind both the clipboard copy and the file export.
+    private func diagnosticsReport() -> String {
         let os = ProcessInfo.processInfo.operatingSystemVersionString
         let outputs = availableOutputs.map {
             "  - \($0.name) (\($0.outputChannels)ch, \(Int($0.nominalSampleRate))Hz, hwVol=\(AudioDevices.hasVolumeControl(for: $0.id)))"
@@ -1057,9 +1059,34 @@ final class MixerStore: ObservableObject {
         Active Taps (\(rows.count)):
         \(tapLines)
         """
+        return report
+    }
+
+    func copyDiagnosticsReport() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(report, forType: .string)
+        NSPasteboard.general.setString(diagnosticsReport(), forType: .string)
         statusMessage = L10n.text("Tanılama raporu panoya kopyalandı.", "Diagnostics copied to clipboard.", lang: lang)
+    }
+
+    /// Saves the same report to a file, so it can be attached to an issue
+    /// instead of pasted into a chat.
+    func exportDiagnosticsReport() {
+        let panel = NSSavePanel()
+        panel.title = L10n.text("Tanılama raporunu kaydet", "Save diagnostics report", lang: lang)
+        panel.nameFieldStringValue = "ClearMix-tanilama.txt"
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try diagnosticsReport().write(to: url, atomically: true, encoding: .utf8)
+            statusMessage = L10n.text(
+                "Rapor kaydedildi: \(url.lastPathComponent)",
+                "Report saved: \(url.lastPathComponent)",
+                lang: lang
+            )
+        } catch {
+            statusMessage = error.localizedDescription
+        }
     }
 
     /// Writes a pending debounced change now, so quitting right after moving a

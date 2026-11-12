@@ -132,6 +132,10 @@ struct SettingsSheetView: View {
                         store.copyDiagnosticsReport()
                     }
                     .controlSize(.small)
+                    Button(L10n.text("Raporu dosyaya kaydet", "Save report to file", lang: store.lang)) {
+                        store.exportDiagnosticsReport()
+                    }
+                    .controlSize(.small)
                 }
             }
 
