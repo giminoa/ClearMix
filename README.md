@@ -91,6 +91,21 @@ swift run clearmix-dsp --help
 
 ---
 
+---
+
+## Performance (measured) / Ölçülen Performans
+
+| Metric | Target | Measured |
+| --- | --- | --- |
+| App start (process launch) | < 1 s | 0.42 s |
+| Idle CPU, no audio tapped | ~1 % | 0.0-0.1 % |
+| Memory, idle | < 60 MB | 23-25 MB |
+| Mic chain latency (estimate) | < 40 ms average | 34-47 ms, avg ~39 ms |
+| Stability, 3-minute soak | no glitches | passed: 0 underrun/overrun after 10 s warm-up |
+
+Measuring: `ps -o %cpu=,rss= -p <pid>` for the app, and `clearmix-mic run --mute --soak <minutes>`
+for the microphone chain (silent, so it is safe during a call).
+
 ## License
 
 - ClearMix source code: [MIT License](LICENSE)
