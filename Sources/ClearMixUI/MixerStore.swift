@@ -71,6 +71,10 @@ final class MixerStore: ObservableObject {
     @Published private(set) var statusMessage: String?
     @Published private(set) var isInstallingBlackHole = false
     @Published private(set) var blackHoleInstallMessage: String?
+    @Published private(set) var isStabilityTestRunning = false
+    @Published private(set) var stabilityTestSecondsLeft = 0
+    @Published private(set) var stabilityTestResult: String?
+    @Published private(set) var stabilityTestPassed: Bool?
 
     private let session: MixSession
     private let settingsStore = SettingsStore()
@@ -84,6 +88,10 @@ final class MixerStore: ObservableObject {
     private var controlRevision = 0
     private var lastLoggedRows = -1
     private var lastWantedMicOnDisconnect = false
+    private var stabilityTimer: Timer?
+    private var stabilityWarmupEndsAt: Date?
+    private var stabilityEndsAt: Date?
+    private var stabilityBaseline: RealtimeStats.Snapshot?
 
     private static let log = Logger(subsystem: "com.clearmix.ui", category: "mixer")
     private static let verbose = ProcessInfo.processInfo.environment["CLEARMIX_DEBUG"] != nil
@@ -206,6 +214,8 @@ final class MixerStore: ObservableObject {
 
     func stop() {
         flushSettings()
+        stabilityTimer?.invalidate()
+        stabilityTimer = nil
         syncTimer?.invalidate()
         syncTimer = nil
         hardwareMonitor?.stop()
@@ -676,6 +686,92 @@ final class MixerStore: ObservableObject {
     func toggleMonitorMicrophone() {
         isMonitoringMic.toggle()
         session.setMicrophoneSettings(monitor: isMonitoringMic)
+    }
+
+    // MARK: - Stability Test
+
+    /// Runs the mic chain for a minute and reports whether its counters moved:
+    /// the same check `clearmix-mic --soak` makes, without leaving the app.
+    func startStabilityTest(minutes: Int = 1) {
+        guard !isStabilityTestRunning else { return }
+        if !session.isMicrophoneRunning {
+            toggleMicrophone()
+        }
+        // The first seconds fill the capture ring; counting them would report the
+        // expected warm-up underruns as a failure.
+        let warmup = 10.0
+        let now = Date()
+        stabilityBaseline = nil
+        stabilityWarmupEndsAt = now.addingTimeInterval(warmup)
+        stabilityEndsAt = now.addingTimeInterval(warmup + Double(minutes) * 60)
+        stabilityTestSecondsLeft = Int(warmup + Double(minutes) * 60)
+        stabilityTestResult = nil
+        stabilityTestPassed = nil
+        isStabilityTestRunning = true
+
+        stabilityTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tickStabilityTest() }
+        }
+        timer.tolerance = 0.2
+        stabilityTimer = timer
+    }
+
+    private func tickStabilityTest() {
+        let now = Date()
+        guard let warmupEnd = stabilityWarmupEndsAt,
+              let endsAt = stabilityEndsAt else { return }
+        stabilityTestSecondsLeft = max(0, Int(endsAt.timeIntervalSince(now).rounded()))
+
+        guard let snapshot = session.microphoneStats?.snapshot else {
+            if now >= warmupEnd {
+                finishStabilityTest(
+                    passed: false,
+                    message: L10n.text("Mikrofon başlatılamadı.", "Microphone could not start.", lang: lang)
+                )
+            }
+            return
+        }
+
+        if now >= warmupEnd, stabilityBaseline == nil {
+            stabilityBaseline = snapshot
+        }
+
+        guard now >= endsAt, let baseline = stabilityBaseline else { return }
+        let underruns = snapshot.underrunFrames &- baseline.underrunFrames
+        let overruns = snapshot.overrunFrames &- baseline.overrunFrames
+        let seconds = Int((endsAt.timeIntervalSince(warmupEnd)).rounded())
+        if underruns == 0 && overruns == 0 {
+            finishStabilityTest(
+                passed: true,
+                message: L10n.text(
+                    "Kararlılık testi geçti: \(seconds) sn boyunca çıtırtı/kesinti yok.",
+                    "Stability test passed: no glitches in \(seconds) s.",
+                    lang: lang
+                )
+            )
+        } else {
+            finishStabilityTest(
+                passed: false,
+                message: L10n.text(
+                    "Kararlılık testi: \(underruns) kare alt besleme, \(overruns) kare taşma.",
+                    "Stability test: \(underruns) frames underrun, \(overruns) frames overrun.",
+                    lang: lang
+                )
+            )
+        }
+    }
+
+    private func finishStabilityTest(passed: Bool, message: String) {
+        stabilityTimer?.invalidate()
+        stabilityTimer = nil
+        stabilityWarmupEndsAt = nil
+        stabilityEndsAt = nil
+        stabilityBaseline = nil
+        isStabilityTestRunning = false
+        stabilityTestSecondsLeft = 0
+        stabilityTestPassed = passed
+        stabilityTestResult = message
     }
 
     // MARK: - Profiles & Settings

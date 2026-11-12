@@ -12,6 +12,7 @@ struct MicrophoneTabView: View {
                 bluetoothWarningCard
             }
             processingCard
+            stabilityCard
             blackHoleCard
             if let error = store.lastError {
                 Text(error)
@@ -259,6 +260,50 @@ struct MicrophoneTabView: View {
         }
         .padding(10)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var stabilityCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: store.stabilityTestPassed == true
+                      ? "checkmark.circle.fill"
+                      : "waveform.badge.checkmark")
+                    .font(.system(size: 11))
+                    .foregroundStyle(store.stabilityTestPassed == true
+                                     ? Color.green
+                                     : (store.stabilityTestPassed == false ? Color.orange : Color.secondary))
+                Text(L10n.text("Kararlılık testi", "Stability test", lang: store.lang))
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Button {
+                    store.startStabilityTest(minutes: 1)
+                } label: {
+                    if store.isStabilityTestRunning {
+                        HStack(spacing: 4) {
+                            ProgressView().controlSize(.mini)
+                            Text("\(store.stabilityTestSecondsLeft) sn")
+                                .font(.system(size: 9).monospacedDigit())
+                        }
+                    } else {
+                        Text(L10n.text("1 dk test et", "Test 1 min", lang: store.lang))
+                            .font(.system(size: 10))
+                    }
+                }
+                .controlSize(.mini)
+                .buttonStyle(.bordered)
+                .disabled(store.isStabilityTestRunning)
+            }
+            Text(store.stabilityTestResult ?? L10n.text(
+                "Mikrofon hattını 1 dakika izleyip çıtırtı/kesinti olup olmadığını sayar.",
+                "Watches the mic chain for a minute and counts glitches.",
+                lang: store.lang
+            ))
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var blackHoleCard: some View {
